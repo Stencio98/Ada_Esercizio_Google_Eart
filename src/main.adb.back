@@ -1,0 +1,259 @@
+with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Integer_Text_IO; use Ada.Integer_Text_IO;
+with Ada.Float_Text_IO; use Ada.Float_Text_IO;
+
+with Ada.Numerics.Elementary_Functions; use Ada.Numerics.Elementary_Functions;
+with Ada.Numerics; use Ada.Numerics; -- sqrt
+with Ada; use Ada;
+
+
+procedure Main is
+
+   -- CONFRONTO FLOAT
+   function Are_Equal (A, B : Float) return Boolean is
+   begin
+      return Abs (A - B) < 0.001;
+   end Are_Equal;
+
+
+   -- store 5 starting parameters
+   subtype Element is Float;
+   type ArrayOfFloat_5 is array (0 .. 4) of Element;
+   -- 0: distance
+   -- 1: direzione in gradi rispetto al nord
+   -- 2: punto di origine (latitudine y)
+   -- 3: punto di origine (longitudine x)
+   -- 4: modello (0 --> piatto; 1 --> sferico; 2 --> geoide)
+
+   -- store 12 parameters (2 arrays x & y)
+   type ArrayOfFloat_12 is array (0 .. 11) of Element;
+
+
+-- READ PARAMETERS FROM KEYBOARD
+   procedure Start (A : in out ArrayOffloat_5) is
+   begin
+      -- Leggere i valori da linea di comando
+      --for I in A'Range loop
+         --Put ("Insert Value " & Integer'Image (I) & ": ");
+         --Get (A(I));
+      --end loop;
+      Put_Line("Insert Distance: ");
+      Get (A(0));
+      Put_Line("Insert angle: ");
+      Get (A(1));
+      -- fix angle
+      -- serve realmente? cos 400 = cos 40 ....
+      while A(1) < -360.0 loop
+         A(1) := A(1) + 360.0;
+      end loop;
+      while A(1) > 360.0 loop
+         A(1) := A(1) - 360.0;
+      end loop;
+
+      Put_Line("Insert latitude (-90 to 90): ");
+      Get (A(2));
+      while A(2) < -90.0 or A(2) > 90.0 loop
+         Put_Line("Insert latitude (-90 to 90): ");
+         Get(A(2));
+      end loop;
+
+      Put_Line("Insert longitude: ");
+      -- fix (change that!!!!!!!!!!!!!!!!!!!!!!!!!!)
+      Get (A(3));
+      while A(3) < -180.0 or A(3) > 180.0 loop
+         Put_Line("Insert longitude (-180 to 180): ");
+         Get(A(3));
+      end loop;
+
+      Put_Line("Insert World Conception (0,1,2): ");
+      Get (A(4));
+      while not Are_Equal(A(4),0.0) and not Are_Equal(A(4),1.0) and not Are_Equal(A(4),2.0) loop
+         Put_Line("Insert World Conception (0,1,2): ");
+         Get(A(4));
+      end loop;
+
+
+      -- Stampare i valori
+      Put_Line ("DEB: Values for computing:");
+      Put("|");
+      for I in A'Range loop
+         Put (Float'Image (A(I)));
+         Put (" |");
+      end loop;
+      New_Line;
+   end Start;
+
+   -- start parameters
+   array_start : ArrayOfFloat_5;
+
+   --latitude & longitude
+   latitudes : ArrayOfFloat_12;
+   longitudes : ArrayOfFloat_12;
+
+
+   procedure piano (
+   LO, LA : in out ArrayOfFloat_12;
+   i      : Integer;
+   angle  : Float;
+   distance_miles : Float
+   ) is
+      Pi           : constant Float := 3.141592653589793;
+      deg_per_mile : constant Float := 1.0 / 69.0; --1 grado crca 69 miglia
+      angle_rad    : Float := angle * Pi / 180.0;
+
+      delta_lat_deg : Float;
+      delta_lon_deg : Float;
+   begin
+      -- Calcola lo spostamento in gradi (lat/lon) tenendo conto della latitudine
+      delta_lat_deg := (distance_miles * Sin(angle_rad)) * deg_per_mile;
+
+   -- Attenzione: serve il coseno della latitudine corrente (in radianti)
+      delta_lon_deg := (distance_miles * Cos(angle_rad)) /
+                    (69.0 * Cos(LA(i - 1) * Pi / 180.0));
+
+      LA(i) := LA(i - 1) + delta_lat_deg;
+      LO(i) := LO(i - 1) + delta_lon_deg;
+   end piano;
+
+   procedure sfera (
+   LO, LA : in out ArrayOfFloat_12;
+   i      : Integer;
+   angle  : Float; -- in gradi
+   distance_miles : Float
+   ) is
+      Pi        : constant Float := 3.141592653589793;
+      R         : constant Float := 3960.0; -- Raggio terrestre in miglia
+      angle_rad : Float := angle * Pi / 180.0;
+
+      lat1_rad  : Float := LA(i - 1) * Pi / 180.0;
+      lon1_rad  : Float := LO(i - 1) * Pi / 180.0;
+      d_div_R   : Float := distance_miles / R;
+
+      lat2_rad  : Float;
+      lon2_rad  : Float;
+
+   begin
+   -- Formula del punto di destinazione su una sfera
+      lat2_rad := ArcSin(Sin(lat1_rad)*Cos(d_div_R) +
+                      Cos(lat1_rad)*Sin(d_div_R)*Cos(angle_rad));
+
+      lon2_rad := lon1_rad +
+               ArcTan(Sin(angle_rad)*Sin(d_div_R)*Cos(lat1_rad),
+                       Cos(d_div_R) - Sin(lat1_rad)*Sin(lat2_rad));
+
+   -- Conversione in gradi
+      LA(i) := lat2_rad * 180.0 / Pi;
+      LO(i) := lon2_rad * 180.0 / Pi;
+   end sfera;
+
+
+
+
+-- EXPORT TO KML
+procedure Export_Punti_To_KML (
+    Latitudes  : in ArrayOfFloat_12;
+    Longitudes : in ArrayOfFloat_12;
+    File_Name  : in String
+) is
+    -- La procedura assume che gli array siano della stessa lunghezza
+    File : File_Type;
+begin
+    -- Apri il file
+    Create (File, Out_File, File_Name);
+
+    -- Scrivi intestazione KML
+    Put_Line (File, "<?xml version=""1.0"" encoding=""UTF-8""?>");
+    Put_Line (File, "<kml xmlns=""http://www.opengis.net/kml/2.2"">");
+    Put_Line (File, "  <Document>");
+
+    -- Loop sui punti
+    for Index in Latitudes'Range loop
+        Put_Line (File, "    <Placemark>");
+        Put_Line (File, "      <name>Punto " & Integer'Image (Index) & "</name>");
+        Put_Line (File, "      <Point>");
+        Put_Line (File,
+            "        <coordinates>" & Float'Image (Longitudes (Index)) & "," &
+                             Float'Image (Latitudes (Index)) & ",0</coordinates>");
+        Put_Line (File, "      </Point>");
+        Put_Line (File, "    </Placemark>");
+    end loop;
+
+    -- Chiudi i tag
+    Put_Line (File, "  </Document>");
+    Put_Line (File, "</kml>");
+
+    -- Chiudi il file
+    Close (File);
+end Export_Punti_To_KML;
+
+-- INIZIO DEL MAIN
+begin
+   Start(array_start);
+   New_Line;
+   -- calcules...
+   -- su un piano --> lantudine (asse y); longitidine (asse x)
+
+   -- imposto il punto A di partenza nell'array
+   latitudes(0) := array_start(2); --a
+   longitudes(0) := array_start(3); --a
+
+   -- controllo prima il tipo di mondo su cui calcolo
+   if Are_Equal (array_start(4), 0.0) then
+      Put_Line ("selezionato: piano");
+      -- 11 chiamate per completare le celle restanti
+      piano (longitudes, latitudes, 1, array_start(1) + 90.0, array_start(0));--b
+      piano (longitudes, latitudes, 2, array_start(1), array_start(0));--c
+      piano (longitudes, latitudes, 3, array_start(1)+ 90.0, array_start(0));--d
+      piano (longitudes, latitudes, 4, array_start(1) - 45.0, array_start(0) * Sqrt(2.0));--e
+      piano (longitudes, latitudes, 5, array_start(1) + 90.0, array_start(0));--f
+      piano (longitudes, latitudes, 6, array_start(1) - 45.0, 3.0/2.0 * array_start(0) * Sqrt(2.0));--g
+      piano (longitudes, latitudes, 7, array_start(1) - 135.0, 3.0/2.0 * array_start(0) * Sqrt(2.0));--h
+      piano (longitudes, latitudes, 8, array_start(1) + 90.0, array_start(0));--i
+      piano (longitudes, latitudes, 9, array_start(1) - 135.0, array_start(0) * Sqrt(2.0));--l
+      piano (longitudes, latitudes, 10, array_start(1) + 90.0, array_start(0));--m
+      piano (longitudes, latitudes, 11, array_start(1) + 180.0, array_start(0));--n
+
+      Put_Line ("___ ___ ___ ___");
+      Put_Line (" ");
+      for i in longitudes'Range loop
+         Put_Line ("LO: " & Float'Image (longitudes(i)));
+         Put_Line ("LA: " & Float'Image (latitudes(i)));
+         Put_Line ("___ ___ ___ ___");
+         Put_Line (" ");
+      end loop;
+
+   elsif Are_Equal (array_start(4), 1.0) then
+      Put_Line ("selezionato: sfera");
+      -- 11 chiamate per completare le celle restanti
+      sfera (longitudes, latitudes, 1, array_start(1) + 90.0, array_start(0));--b
+      sfera (longitudes, latitudes, 2, array_start(1), array_start(0));--c
+      sfera (longitudes, latitudes, 3, array_start(1)+ 90.0, array_start(0));--d
+      sfera (longitudes, latitudes, 4, array_start(1) - 45.0, array_start(0) * Sqrt(2.0));--e
+      sfera (longitudes, latitudes, 5, array_start(1) + 90.0, array_start(0));--f
+      sfera (longitudes, latitudes, 6, array_start(1) - 45.0, 3.0/2.0 * array_start(0) * Sqrt(2.0));--g
+      sfera (longitudes, latitudes, 7, array_start(1) - 135.0, 3.0/2.0 * array_start(0) * Sqrt(2.0));--h
+      sfera (longitudes, latitudes, 8, array_start(1) + 90.0, array_start(0));--i
+      sfera (longitudes, latitudes, 9, array_start(1) - 135.0, array_start(0) * Sqrt(2.0));--l
+      sfera (longitudes, latitudes, 10, array_start(1) + 90.0, array_start(0));--m
+      sfera (longitudes, latitudes, 11, array_start(1) + 180.0, array_start(0));--n
+
+      Put_Line ("___ ___ ___ ___");
+      Put_Line (" ");
+      for i in longitudes'Range loop
+         Put_Line ("LO: " & Float'Image (longitudes(i)));
+         Put_Line ("LA: " & Float'Image (latitudes(i)));
+         Put_Line ("___ ___ ___ ___");
+         Put_Line (" ");
+      end loop;
+
+
+   elsif Are_Equal (array_start(4), 2.0) then
+      Put_Line ("selezionato: geoide");
+   end if;
+
+   -- making KML file
+   Export_Punti_To_KML(latitudes, longitudes, "out.kml");
+
+
+
+end Main;
