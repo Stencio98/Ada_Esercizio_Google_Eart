@@ -196,6 +196,14 @@ package body my_utils is
       alpha_due := Arctan(sin_alpha, - Sin(U1) * Sin(sigma) + Cos(U1) * Cos(sigma) * Cos(angle));
       LA(i) := phi_2 * rad_to_deg;
       LO(i) := lambda_due * rad_to_deg;
+
+      -- serve davvero?
+      if LO(i) > 180.0 then
+         LO(i) := LO(i) - 360.0;
+      elsif LO(i) < -180.0 then
+         LO(i) := LO(i) + 360.0;
+      end if;
+
    end vincenty;
 
       -- EXPORT TO KML
